@@ -32,6 +32,11 @@ mutable struct MatrixSpatialOperators
     T_mDIVy_V    :: AbstractArray{Float64, 2}
     T_mLAPy_T    :: AbstractArray{Float64, 2}
 
+
+    VW_∂y_W      :: AbstractArray{Float64, 2}
+    VW_∂z_V      :: AbstractArray{Float64, 2}
+
+
     U_interp_T  :: AbstractArray{Float64, 2} 
     V_interp_T  :: AbstractArray{Float64, 2} 
     W_interp_T  :: AbstractArray{Float64, 2} 
@@ -364,6 +369,13 @@ mutable struct MatrixSpatialOperators
         T_f_T = 2 * gd.Ω * sin.(gd.θ_T) |> cvtDiagOp
         V_f_V = 2 * gd.Ω * sin.(gd.θ_V) |> cvtDiagOp
 
+
+        # Additional operators for Eliassen operators
+        VW_∂y_W = VW_mask_VW * ( op.VW_S_W - op.VW_N_W )  ; dropzeros!(VW_∂y_W);
+        VW_∂z_V = copy(VW_DIVz_V)
+
+
+
         return new(
             op,
             
@@ -396,6 +408,10 @@ mutable struct MatrixSpatialOperators
             V_m∂y_T,
             T_mDIVy_V,
             T_mLAPy_T,
+
+            VW_∂y_W,
+            VW_∂z_V,
+
 
             U_interp_T,
             V_interp_T,

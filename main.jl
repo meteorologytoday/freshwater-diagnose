@@ -30,7 +30,7 @@ W_A_W = A * ones(Float64, mop.W_pts) |> cvtDiagOp
 V_C_V = C * ones(Float64, mop.V_pts) |> cvtDiagOp
 
 # Load data...
-
+println("Loading data...")
 
 #=
 
@@ -47,8 +47,10 @@ mask_VW[end,   :] .= 0
 mask_VW[  :,   1] .= 0
 mask_VW[  :, end] .= 0
 
-eWV_send_WV = sparse( mop.VW_I_VW[ mask_VW[:] , :] )
+mask_eVW = reshape(mask_VW[mask_VW .!= 0], :)
+eVW_send_VW = sparse( mop.VW_I_VW[ mask_eVW , :] )
 
+println("eWV_send_WV constructed")
 
 op_LHS = eVW_send_VW * (
     
@@ -59,13 +61,18 @@ op_LHS = eVW_send_VW * (
 
 ) 
 
-op_RHS_Q =   V_∂y_T
-op_RHS_F = - W_∂z_T
+#op_RHS_Q =   mop.V_∂y_T
+#op_RHS_F = - W_∂z_T
+
+# Construct analytical solution
+# Function we are doing is 
+
 
 
 
 # Invert ψ
-@time ψ = op_LHS \ ( op_RHS_Q * Q + op_RHS_F * F  )
+#@time ψ = op_LHS \ ( op_RHS_Q * Q + op_RHS_F * F  )
+@time ψ = op_LHS \ RHS
 
 # Output solution
 
