@@ -9,11 +9,11 @@ cvtDiagOp = (a,) -> spdiagm(0 => view(a, :))
 
 print("Making grid...")
 gd = Grid(;
-    Ny = 60,
-    Nz = 30,
+    Ny = 600,
+    Nz = 300,
     Ω  = 7.292e-5,
-    θn = 80.0,
-    θs = 10.0,
+    θn = deg2rad(70),
+    θs = deg2rad(20),
     H  = 1.5e4,
     R  = 6.4e6,
 ) 
@@ -30,23 +30,86 @@ C = (1e-2)^2
 W_A_W = A * ones(Float64, mop.W_pts) |> cvtDiagOp
 V_C_V = C * ones(Float64, mop.V_pts) |> cvtDiagOp
 
-#
-# Construct analytical solution
-# Function we are doing is 
-#
-# ψ = sin(ϕ) sin(πz/H)
-# 
-# After it is operated, the solution is
-#
-#   - A ψ / a^2 * ( 2 + 1/cos^2(ϕ) ) - C π^2/H^2 * ψ
-# = - ψ ( A / a^2 * ( 2 + 1/cos^2(ϕ) ) + C π^2/H^2 )
-#
+target_solution = 3
 
-θ_VW = deg2rad.(gd.θ_VW)
+println("##### Target solution: ", target_solution, " #####")
 
-ψ = sin.(θ_VW) .* sin.(π * gd.z_VW ./ gd.H)
-Eψ_a = - ψ .* ( A / gd.R^2 * (2 .+ 1 ./ ( cos.(θ_VW) ).^2 .+ C * π^2 / gd.H^2) )
+if target_solution == 1
 
+    # === analytical solution set 1: z direction ===
+    #
+    # Construct analytical solution
+    # Function we are doing is 
+    #
+    # ψ = sin(πk z/H)
+    # 
+    # After it is operated, the solution is
+    #
+    # Eψ = - C (πk/H)^2 ψ - A / a^2 * ψ/cos^2(ϕ)
+    #
+
+ 
+    k = 2.0
+    ψ = sin.(π * k * gd.z_VW / gd.H)
+
+    Eψ_a = - C * (π * k / gd.H)^2 * ψ - A / gd.R^2 * ψ ./ (cos.(gd.θ_VW)).^2 
+
+elseif target_solution == 2
+
+    # === analytical solution set 1: y direction ===
+    Δθ = gd.θn - gd.θs
+    m = 2.0
+    ψ = sin.(π * m * (gd.θ_VW .- gd.θs) / Δθ)
+    
+    Eψ_a = (
+            - A / gd.R^2 * (
+                ψ ./ (cos.(gd.θ_VW)).^2.0
+             .+ tan.(gd.θ_VW) * (π * m / Δθ) .* cos.(π * m * (gd.θ_VW .- gd.θs) / Δθ)
+             .+ (π*m/Δθ)^2 * ψ
+            )
+    )
+elseif target_solution == 3
+
+    # === analytical solution set 3 : both y and z ===
+    #
+    # Construct analytical solution
+    # Function we are doing is 
+    #
+    # ψ = sin(π m (ϕ - ϕs) / Δϕ) sin(πk z/H)
+    # 
+    # where Δϕ = ϕn - ϕs
+    #
+    # After it is operated, the solution is
+    #
+    # Eψ = - C (πk/H)^2 ψ 
+    #      - A / a^2 * (
+    #           ψ/cos^2(ϕ)
+    #         + tan(ϕ) (πm / Δϕ) cos(πm (ϕ-ϕs) / Δϕ) sin(πk z/H)
+    #         - (πm/Δϕ)^2 ψ
+    #       )
+    #   - A ψ / a^2 * ( 2 + 1/cos^2(ϕ) ) - C π^2/H^2 * ψ
+    # = - ψ ( A / a^2 * ( 2 + 1/cos^2(ϕ) ) + C π^2/H^2 )
+    #
+
+    Δθ = gd.θn - gd.θs
+    m = 2.0
+    k = 2.0
+
+    ψ = sin.(π * m * (gd.θ_VW .- gd.θs) / Δθ) .* sin.(π * k * gd.z_VW / gd.H)
+
+    #Eψ_a = - ψ .* ( A / gd.R^2 * (2 .+ 1 ./ ( cos.(gd.θ_VW) ).^2 .+ C * π^2 / gd.H^2) )
+
+    Eψ_a = ( - C * (π * k / gd.H)^2 * ψ 
+            - A / gd.R^2 * (
+                ψ ./ (cos.(gd.θ_VW)).^2.0
+             .+ tan.(gd.θ_VW) * (π * m / Δθ) .* cos.(π * m * (gd.θ_VW .- gd.θs) / Δθ) .* sin.(π * k * gd.z_VW / gd.H)
+             .+ (π*m/Δθ)^2 * ψ
+            )
+    )
+else
+
+    throw(ErrorException("Wrong solution target..."))
+end
 
 # Load data...
 println("Loading data...")
@@ -73,14 +136,17 @@ println("eWV_send_WV constructed")
 
 op_LHS = eVW_send_VW * (
     
-    sop.VW_∂y_W * W_A_W * sop.W_DIVy_VW +
-    sop.VW_∂z_V * V_C_V * sop.V_∂z_VW  
+    sop.VW_∂y_W * W_A_W * sop.W_DIVy_VW
+    + sop.VW_∂z_V * V_C_V * sop.V_∂z_VW  
 #    T_∂y_V  * V_B_V * V_∂z_VW   +
 #    T_∂z_W  * W_B_W * W_DIVy_VW
 
 ) 
 
 Eψ_n = reshapeVW( VW_send_eVW * op_LHS * ψ[:] )
+
+∂ψ∂y = reshape( sop.W_∂y_VW * ψ[:], mop.W_dim )
+DIVyψ = reshape( sop.W_DIVy_VW * ψ[:], mop.W_dim )
 
 #op_RHS_Q =   mop.V_∂y_T
 #op_RHS_F = - W_∂z_T
@@ -121,6 +187,11 @@ Dataset("output.nc", "c") do ds
     defVar(ds, "psi",    ψ,    ("Nzp1", "Nyp1", "Nx"))
     defVar(ds, "Epsi_a", Eψ_a, ("Nzp1", "Nyp1", "Nx"))
     defVar(ds, "Epsi_n", Eψ_n, ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "Error_abs", Eψ_n - Eψ_a, ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "Error_rto", (Eψ_n - Eψ_a) ./ Eψ_a, ("Nzp1", "Nyp1", "Nx"))
+
+    defVar(ds, "dpsidy",  ∂ψ∂y,    ("Nzp1", "Ny", "Nx"))
+    defVar(ds, "DIVypsi",  DIVyψ,  ("Nzp1", "Ny", "Nx"))
 
     
 

@@ -33,6 +33,7 @@ mutable struct MatrixSpatialOperators
     T_mLAPy_T    :: AbstractArray{Float64, 2}
 
 
+    W_∂y_VW      :: AbstractArray{Float64, 2}
     VW_∂y_W      :: AbstractArray{Float64, 2}
     VW_∂z_V      :: AbstractArray{Float64, 2}
 
@@ -371,8 +372,10 @@ mutable struct MatrixSpatialOperators
 
 
         # Additional operators for Eliassen operators
-        VW_∂y_W = VW_mask_VW * ( op.VW_S_W - op.VW_N_W )  ; dropzeros!(VW_∂y_W);
+        W_∂y_VW = W_mask_W * W_invΔy_W   * ( op.W_S_VW  - op.W_N_VW ); dropzeros!(W_∂y_VW);
+        VW_∂y_W = VW_mask_VW * VW_invΔy_VW * ( op.VW_S_W - op.VW_N_W )  ; dropzeros!(VW_∂y_W);
         VW_∂z_V = copy(VW_DIVz_V)
+
 
 
 
@@ -409,6 +412,7 @@ mutable struct MatrixSpatialOperators
             T_mDIVy_V,
             T_mLAPy_T,
 
+            W_∂y_VW,
             VW_∂y_W,
             VW_∂z_V,
 
