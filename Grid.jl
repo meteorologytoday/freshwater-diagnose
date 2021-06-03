@@ -218,7 +218,7 @@ function genVerticalGrid(;
     η = collect(Float64, range(0, 1, length=Nz+1))
 
     #z_W  = H * grid_shape.(η)
-    z_W  = H * collect(Float64, range(0, -1, length=Nz+1))
+    z_W  = H * collect(Float64, range(0, 1, length=Nz+1))
 
     Δz_W = similar(z_W)
 
