@@ -27,48 +27,18 @@ reshapeVW = (a,) -> reshape(a, mop.VW_dim)
 A = 100.0 / 10000.0
 C = (1e-2)^2
 
+B = A / 2
+
 W_A_W = A * ones(Float64, mop.W_pts) |> cvtDiagOp
 V_C_V = C * ones(Float64, mop.V_pts) |> cvtDiagOp
+V_B_V = B * ones(Float64, mop.V_pts) |> cvtDiagOp
+W_B_W = B * ones(Float64, mop.W_pts) |> cvtDiagOp
 
-target_solution = 3
+target_solution = 1
 
 println("##### Target solution: ", target_solution, " #####")
 
 if target_solution == 1
-
-    # === analytical solution set 1: z direction ===
-    #
-    # Construct analytical solution
-    # Function we are doing is 
-    #
-    # ψ = sin(πk z/H)
-    # 
-    # After it is operated, the solution is
-    #
-    # Eψ = - C (πk/H)^2 ψ - A / a^2 * ψ/cos^2(ϕ)
-    #
-
- 
-    k = 2.0
-    ψ = sin.(π * k * gd.z_VW / gd.H)
-
-    Eψ_a = - C * (π * k / gd.H)^2 * ψ - A / gd.R^2 * ψ ./ (cos.(gd.θ_VW)).^2 
-
-elseif target_solution == 2
-
-    # === analytical solution set 1: y direction ===
-    Δθ = gd.θn - gd.θs
-    m = 2.0
-    ψ = sin.(π * m * (gd.θ_VW .- gd.θs) / Δθ)
-    
-    Eψ_a = (
-            - A / gd.R^2 * (
-                ψ ./ (cos.(gd.θ_VW)).^2.0
-             .+ tan.(gd.θ_VW) * (π * m / Δθ) .* cos.(π * m * (gd.θ_VW .- gd.θs) / Δθ)
-             .+ (π*m/Δθ)^2 * ψ
-            )
-    )
-elseif target_solution == 3
 
     # === analytical solution set 3 : both y and z ===
     #
@@ -88,24 +58,38 @@ elseif target_solution == 3
     #         - (πm/Δϕ)^2 ψ
     #       )
     #   - A ψ / a^2 * ( 2 + 1/cos^2(ϕ) ) - C π^2/H^2 * ψ
-    # = - ψ ( A / a^2 * ( 2 + 1/cos^2(ϕ) ) + C π^2/H^2 )
+    #   + B / a * (
+    #        (πm/Δϕ) (πk/H) cos(πm (ϕ-ϕs) / Δϕ) cos(πk z/H)
+    #      - sin(ϕ) (πk/H) sin(πm (ϕ-ϕs) / Δϕ) cos(πk z/H) 
+    #   )
+    #
     #
 
     Δθ = gd.θn - gd.θs
     m = 2.0
     k = 2.0
 
-    ψ = sin.(π * m * (gd.θ_VW .- gd.θs) / Δθ) .* sin.(π * k * gd.z_VW / gd.H)
+    θ = gd.θ_VW
+    M = m*π/Δθ
+    K = k*π/gd.H
+    Y = M * (θ .- gd.θs)
+    Z = K * gd.z_VW
 
-    #Eψ_a = - ψ .* ( A / gd.R^2 * (2 .+ 1 ./ ( cos.(gd.θ_VW) ).^2 .+ C * π^2 / gd.H^2) )
 
-    Eψ_a = ( - C * (π * k / gd.H)^2 * ψ 
+    ψ = sin.(Y) .* sin.(Z)
+
+    Eψ_a = ( - C * K^2 * ψ 
             - A / gd.R^2 * (
-                ψ ./ (cos.(gd.θ_VW)).^2.0
-             .+ tan.(gd.θ_VW) * (π * m / Δθ) .* cos.(π * m * (gd.θ_VW .- gd.θs) / Δθ) .* sin.(π * k * gd.z_VW / gd.H)
-             .+ (π*m/Δθ)^2 * ψ
+                ψ ./ (cos.(θ)).^2.0
+             .+ tan.(θ) * M .* cos.(Y) .* sin.(Z)
+             .+ M^2 * ψ
             )
+            + B / gd.R * (
+            2 * M * K * cos.(Y) .* cos.(Z)
+          - K * sin.(θ) .* sin.(Y) .* cos.(Z) 
+          )
     )
+
 else
 
     throw(ErrorException("Wrong solution target..."))
@@ -138,8 +122,8 @@ op_LHS = eVW_send_VW * (
     
     sop.VW_∂y_W * W_A_W * sop.W_DIVy_VW
     + sop.VW_∂z_V * V_C_V * sop.V_∂z_VW  
-#    T_∂y_V  * V_B_V * V_∂z_VW   +
-#    T_∂z_W  * W_B_W * W_DIVy_VW
+    + sop.VW_interp_T * sop.T_∂y_V  * V_B_V * sop.V_∂z_VW 
+    + sop.VW_interp_T * sop.T_∂z_W  * W_B_W * sop.W_DIVy_VW
 
 ) 
 
