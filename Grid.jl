@@ -7,9 +7,6 @@ mutable struct Grid
     R   :: Float64    # Radius of planet
     H   :: Float64    # Atmosphere 
 
-    θn :: Float64
-    θs :: Float64
-
     Nx :: Int64
     Ny :: Int64
     Nz :: Int64
@@ -33,11 +30,11 @@ mutable struct Grid
     Δy_VW :: AbstractArray{Float64, 3}
     Δz_VW :: AbstractArray{Float64, 3}
    
-    θ_T   :: AbstractArray{Float64, 3}
-    θ_U   :: AbstractArray{Float64, 3}
-    θ_V   :: AbstractArray{Float64, 3}
-    θ_W   :: AbstractArray{Float64, 3}
-    θ_VW   :: AbstractArray{Float64, 3}
+    ϕ_T   :: AbstractArray{Float64, 3}
+    ϕ_U   :: AbstractArray{Float64, 3}
+    ϕ_V   :: AbstractArray{Float64, 3}
+    ϕ_W   :: AbstractArray{Float64, 3}
+    ϕ_VW   :: AbstractArray{Float64, 3}
 
     z_T   :: AbstractArray{Float64, 3}
     z_U   :: AbstractArray{Float64, 3}
@@ -52,28 +49,39 @@ mutable struct Grid
     mask_T  :: AbstractArray{Float64, 3}
 
     function Grid(;
-        Ny    :: Int64,
-        Nz    :: Int64,
+        ϕ_V   :: Array{Float64, 1},
+        z_W   :: Array{Float64, 1},
         Ω     :: Float64,
-        θn    :: Float64, 
-        θs    :: Float64,
-        H     :: Float64,
         R     :: Float64,
     )
 
         Δλ = [ 2π ]
         Nx = length(Δλ)
+        Ny = length(ϕ_V) - 1
+        Nz = length(z_W) - 1
 
-        _z_T, _z_W, _Δz_T, _Δz_W = genVerticalGrid(Nz=Nz, H=H)
-        _θ_T, _θ_V, _Δθ_T, _Δθ_V = genHorizontalGrid(Nθ=Ny, θs=θs, θn=θn)
+
+        _z_W = copy(z_W)
+        _z_T = (_z_W[1:end-1] + _z_W[2:end]) / 2.0
+        _Δz_T = _z_W[2:end] - _z_W[1:end-1]  
+        
+        _Δz_W = similar(_z_W)
+        _Δz_W[1:end-1] = _Δz_T
+        _Δz_W[end] = _Δz_T[end]        
+
+        _ϕ_V = copy(ϕ_V)
+        _ϕ_T = (_ϕ_V[1:end-1] + _ϕ_V[2:end]) / 2.0
+        _Δϕ_T = _ϕ_V[2:end] - _ϕ_V[1:end-1]  
+        
+        _Δϕ_V = similar(_ϕ_V)
+        _Δϕ_V[1:end-1] = _Δϕ_T
+        _Δϕ_V[end] = _Δϕ_T[end]
+
 
         _z_U  = copy(_z_T)
         _Δz_U = copy(_Δz_T)
-        _θ_U  = copy(_θ_T)
-        _Δθ_U = copy(_Δθ_T)
-
-        #println("_Δz_W: ", size(_Δz_W))
-        #println("_Δz_W: ", _Δz_W)
+        _ϕ_U  = copy(_ϕ_T)
+        _Δϕ_U = copy(_Δϕ_T)
 
         z_makeMesh = (a, ny, nx) -> repeat( reshape(a, :, 1, 1), outer=(1, ny, nx) )
         y_makeMesh = (a, nz, nx) -> repeat( reshape(a, 1, :, 1), outer=(nz, 1, nx) )
@@ -92,17 +100,17 @@ mutable struct Grid
         Δz_VW = z_makeMesh(_Δz_W, Ny+1, Nx)
 
 
-        θ_T   = y_makeMesh(_θ_T,  Nz,   Nx  )
-        θ_U   = y_makeMesh(_θ_U,  Nz,   Nx+1)
-        θ_V   = y_makeMesh(_θ_V,  Nz,   Nx  )
-        θ_W   = y_makeMesh(_θ_T,  Nz+1, Nx  )
-        θ_VW  = y_makeMesh(_θ_V,  Nz+1, Nx  )
+        ϕ_T   = y_makeMesh(_ϕ_T,  Nz,   Nx  )
+        ϕ_U   = y_makeMesh(_ϕ_U,  Nz,   Nx+1)
+        ϕ_V   = y_makeMesh(_ϕ_V,  Nz,   Nx  )
+        ϕ_W   = y_makeMesh(_ϕ_T,  Nz+1, Nx  )
+        ϕ_VW  = y_makeMesh(_ϕ_V,  Nz+1, Nx  )
 
-        Δθ_T   = y_makeMesh(_Δθ_T, Nz,   Nx  )
-        Δθ_U   = y_makeMesh(_Δθ_T, Nz,   Nx+1)
-        Δθ_V   = y_makeMesh(_Δθ_V, Nz,   Nx  )
-        Δθ_W   = y_makeMesh(_Δθ_T, Nz+1, Nx  )
-        Δθ_VW  = y_makeMesh(_Δθ_V, Nz+1, Nx  )
+        Δϕ_T   = y_makeMesh(_Δϕ_T, Nz,   Nx  )
+        Δϕ_U   = y_makeMesh(_Δϕ_T, Nz,   Nx+1)
+        Δϕ_V   = y_makeMesh(_Δϕ_V, Nz,   Nx  )
+        Δϕ_W   = y_makeMesh(_Δϕ_T, Nz+1, Nx  )
+        Δϕ_VW  = y_makeMesh(_Δϕ_V, Nz+1, Nx  )
 
         Δλ_T   = x_makeMesh(Δλ, Nz, Ny)
         Δλ_V   = x_makeMesh(Δλ, Nz, Ny+1)
@@ -110,19 +118,19 @@ mutable struct Grid
         Δλ_VW  = x_makeMesh(Δλ, Nz+1, Ny+1)
 
         # Calculating horizontal grid edges
-        Δx_T = R * cos.(θ_T) .* Δλ_T;
-        Δy_T = R * Δθ_T;
+        Δx_T = R * cos.(ϕ_T) .* Δλ_T;
+        Δy_T = R * Δϕ_T;
 
-        Δy_U = R * Δθ_U;
+        Δy_U = R * Δϕ_U;
 
-        Δx_V = R * cos.(θ_V) .* Δλ_V;
-        Δy_V = R * Δθ_V;
+        Δx_V = R * cos.(ϕ_V) .* Δλ_V;
+        Δy_V = R * Δϕ_V;
  
-        Δx_W = R * cos.(θ_W) .* Δλ_W;
-        Δy_W = R * Δθ_W;
+        Δx_W = R * cos.(ϕ_W) .* Δλ_W;
+        Δy_W = R * Δϕ_W;
 
-        Δx_VW = R * cos.(θ_VW) .* Δλ_VW;
-        Δy_VW = R * Δθ_VW;
+        Δx_VW = R * cos.(ϕ_VW) .* Δλ_VW;
+        Δy_VW = R * Δϕ_VW;
 
 
         ∫Δv = sum(Δx_T .* Δy_T .* Δz_T)
@@ -134,9 +142,6 @@ mutable struct Grid
             Ω,
             R,
             H,
-
-            θn,
-            θs,
 
             Nx,
             Ny,
@@ -161,11 +166,11 @@ mutable struct Grid
             Δy_VW,
             Δz_VW,
 
-            θ_T,
-            θ_U,
-            θ_V,
-            θ_W,
-            θ_VW,
+            ϕ_T,
+            ϕ_U,
+            ϕ_V,
+            ϕ_W,
+            ϕ_VW,
 
             z_T,
             z_U,
@@ -186,23 +191,23 @@ end
 
 
 function genHorizontalGrid(;
-    Nθ :: Int64,
-    θs :: Float64,
-    θn :: Float64,
+    Nϕ :: Int64,
+    ϕs :: Float64,
+    ϕn :: Float64,
 )
 
-    θ_V = collect(Float64, range(θs, θn, length=Nθ+1))
-    θ_T = (θ_V[1:end-1] + θ_V[2:end]) / 2.0
+    ϕ_V = collect(Float64, range(ϕs, ϕn, length=Nϕ+1))
+    ϕ_T = (ϕ_V[1:end-1] + ϕ_V[2:end]) / 2.0
 
-    Δθ_T = similar(θ_T)
-    Δθ_V = similar(θ_V)
+    Δϕ_T = similar(ϕ_T)
+    Δϕ_V = similar(ϕ_V)
 
-    δθ = θ_V[2] - θ_V[1]
+    δϕ = ϕ_V[2] - ϕ_V[1]
 
-    Δθ_T .= δθ
-    Δθ_V .= δθ
+    Δϕ_T .= δϕ
+    Δϕ_V .= δϕ
     
-    return θ_T, θ_V, Δθ_T, Δθ_V
+    return ϕ_T, ϕ_V, Δϕ_T, Δϕ_V
 
 end
 

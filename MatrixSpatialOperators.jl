@@ -364,11 +364,11 @@ mutable struct MatrixSpatialOperators
         end
         =#
 
-        f_T   = 2 * gd.Ω * sin.(gd.θ_T)
-        f_V   = 2 * gd.Ω * sin.(gd.θ_V)
+        f_T   = 2 * gd.Ω * sin.(gd.ϕ_T)
+        f_V   = 2 * gd.Ω * sin.(gd.ϕ_V)
         
-        T_f_T = 2 * gd.Ω * sin.(gd.θ_T) |> cvtDiagOp
-        V_f_V = 2 * gd.Ω * sin.(gd.θ_V) |> cvtDiagOp
+        T_f_T = 2 * gd.Ω * sin.(gd.ϕ_T) |> cvtDiagOp
+        V_f_V = 2 * gd.Ω * sin.(gd.ϕ_V) |> cvtDiagOp
 
 
         # Additional operators for Eliassen operators
