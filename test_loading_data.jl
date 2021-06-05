@@ -51,6 +51,7 @@ mop = sop.op
 
 reshapeVW = (a,) -> reshape(a, mop.VW_dim) 
 reshapeW = (a,) -> reshape(a, mop.W_dim) 
+reshapeV = (a,) -> reshape(a, mop.V_dim) 
 reshapeT = (a,) -> reshape(a, mop.T_dim) 
 
 # Stream function
@@ -64,11 +65,19 @@ T_T = reshapeT(sop.T_interp_V * T_V[:])
 
 # Calculate potential temperature
 p0 = 1000.0 # hPa
-Π = calΠ.(repeat(reshape(lev, :, 1), outer=(1, gd.Ny)))
-θ_T = T_T .* Π
+Π_T = calΠ.(repeat(reshape(lev, :, 1), outer=(1, gd.Ny)))
+Π_V = calΠ.(repeat(reshape(lev, :, 1), outer=(1, gd.Ny+1)))
+θ_T = T_T .* Π_T
+θ_V = T_V .* Π_V
 
 A_W = reshapeW( g/θ0 * sop.W_∂z_T * θ_T[:]) 
 W_A_W = cvtDiagOp(A_W)
+
+B_V = reshapeV( - g/θ0 * sop.V_∂y_T * θ_T[:]) 
+B_W = reshapeW( - g/θ0 * sop.W_interp_T * sop.T_∂y_V * θ_V[:]) 
+
+V_B_V = cvtDiagOp(B_V)
+W_B_W = cvtDiagOp(B_W)
 
 #=
 A = 100.0 / 10000.0
@@ -174,6 +183,8 @@ Dataset("output.nc", "c") do ds
     defVar(ds, "psi",  ψ_VW,    ("Nzp1", "Nyp1", "Nx"))
     defVar(ds, "A_W",  A_W,     ("Nzp1", "Ny",   "Nx"))
     defVar(ds, "T_T",  T_T,     ("Nz",   "Ny",   "Nx"))
+    defVar(ds, "B_W",  B_W,     ("Nzp1", "Ny",   "Nx"))
+    defVar(ds, "B_V",  B_V,     ("Nz",   "Nyp1", "Nx"))
     
 
 end
