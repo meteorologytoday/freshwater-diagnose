@@ -1,4 +1,6 @@
 *.nc
+!avgzm.nc
+
 *.swp
 *.tmp
 
