@@ -93,7 +93,7 @@ mutable struct MatrixOperators
         Nx             :: Int64,
         # if :atm then z starts from ground and upwards
         # if :ocn then z starts from surface and downwards
-        atm_or_ocn     :: Symbol = :ocn,
+        ocn_or_atm     :: Symbol = :ocn,
     )
         
         # Making operator
@@ -240,15 +240,15 @@ mutable struct MatrixOperators
         V[:, :, :] = view(num_VW, 1:Nz  , :, :);      V_DN_VW = build!(VW_I_VW_expand, V)
 
 
-        if atm_or_ocn == :ocn
+        if ocn_or_atm == :ocn
             # do nothing
-        elseif atm_or_ocn == :atm
+        elseif ocn_or_atm == :atm
             T_UP_T,  T_DN_T  = T_DN_T,  T_UP_T
             T_UP_W,  T_DN_W  = T_DN_W,  T_UP_W
             V_UP_VW, V_DN_VW = V_DN_VW, V_UP_VW
         else
 
-            throw(ErrorException("Parameter `atm_or_ocn` only allows :atm and :ocn"))
+            throw(ErrorException("Parameter `ocn_or_atm` only allows :atm and :ocn"))
 
         end
 

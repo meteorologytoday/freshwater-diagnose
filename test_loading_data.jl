@@ -8,10 +8,14 @@ include("MatrixSpatialOperators.jl")
 
 
 p0 = 1000.0 # hPa
-θ0 = 300.0
 cp = 1004.0
-H  = cp * θ0 / g
+H  = 15e3
+θ0 = H / (cp / g)
 
+θ0 = 300.0
+H = cp * θ0 / g
+
+println("θ0 = ", θ0)
 
 calΠ = (p,) -> ( p / p0 ).^(2/5) 
 cvtDiagOp = (a,) -> spdiagm(0 => view(a, :))
@@ -46,7 +50,7 @@ gd = Grid(;
 ) 
 println("done.")
 
-@time sop = MatrixSpatialOperators(gd)
+@time sop = MatrixSpatialOperators(gd, ocn_or_atm=:atm)
 mop = sop.op
 
 reshapeVW = (a,) -> reshape(a, mop.VW_dim) 
@@ -62,13 +66,14 @@ println("Deriving A, B, and C...")
 
 # Convert grid
 T_T = reshapeT(sop.T_interp_V * T_V[:])
+U_T = reshapeT(sop.T_interp_V * U_V[:])
 
 # Calculate potential temperature
 p0 = 1000.0 # hPa
 Π_T = calΠ.(repeat(reshape(lev, :, 1), outer=(1, gd.Ny)))
 Π_V = calΠ.(repeat(reshape(lev, :, 1), outer=(1, gd.Ny+1)))
-θ_T = T_T .* Π_T
-θ_V = T_V .* Π_V
+θ_T = T_T ./ Π_T
+θ_V = T_V ./ Π_V
 
 A_W = reshapeW( g/θ0 * sop.W_∂z_T * θ_T[:]) 
 W_A_W = cvtDiagOp(A_W)
@@ -78,6 +83,21 @@ B_W = reshapeW( - g/θ0 * sop.W_interp_T * sop.T_∂y_V * θ_V[:])
 
 V_B_V = cvtDiagOp(B_V)
 W_B_W = cvtDiagOp(B_W)
+
+# Calculate vorticity
+f_T = 2 * gd.Ω * sin.(gd.ϕ_T)
+ζ_T = - reshapeT(sop.T_DIVy_V * U_V[:])
+η_T = f_T + ζ_T
+
+C_T = η_T .* ( f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R )
+C_V = reshapeV( sop.V_interp_T * C_T[:])
+V_C_V = cvtDiagOp(C_V)
+
+
+A_T = reshapeT( sop.T_interp_W * A_W[:] )
+B_T = reshapeT( sop.T_interp_V * B_V[:] )
+
+Δ_T = A_T .* C_T - B_T.^2
 
 #=
 A = 100.0 / 10000.0
@@ -89,14 +109,12 @@ V_B_V = B * ones(Float64, mop.V_pts) |> cvtDiagOp
 W_B_W = B * ones(Float64, mop.W_pts) |> cvtDiagOp
 =#
 
-#=
 ϕ = gd.ϕ_T
 Z = gd.z_T / gd.H
 ϕc = deg2rad(45)
-σϕ = deg2rad(5)
+σϕ = deg2rad(2)
 Q0 = 0.1 # K / sec
 Q = Q0 * exp.( - ((ϕ .- ϕc) / σϕ ).^2 ) .* sin.(π*Z)
-=#
 
 
 #=
@@ -108,7 +126,6 @@ ddz B ddy ψ
 
 =#
 
-#=
 mask_VW = reshapeVW(collect(Integer, 1:mop.VW_pts))
 mask_VW[  1,   :] .= 0
 mask_VW[end,   :] .= 0
@@ -132,28 +149,10 @@ eVW_E_eVW = eVW_send_VW * VW_E_VW * VW_send_eVW
 eVW_Qop_T = eVW_send_VW * sop.VW_interp_V * sop.V_∂y_T
 
 
-
-Eψ_n = reshapeVW( VW_E_VW * ψ[:] )
-
-∂ψ∂y = reshape( sop.W_∂y_VW * ψ[:], mop.W_dim )
-DIVyψ = reshape( sop.W_DIVy_VW * ψ[:], mop.W_dim )
-
-#op_RHS_Q =   mop.V_∂y_T
-#op_RHS_F = - W_∂z_T
-
-
-
 # Invert ψ
-#@time ψ_n = evW_E_VW \ ( op_RHS_Q * Q + op_RHS_F * F  )
-println("Inverting...")
-@time ψ_n = VW_send_eVW * ( eVW_E_eVW \ ( eVW_send_VW * Eψ_n[:] ) ) |> reshapeVW
-
-
-
 RHS_Q = VW_send_eVW * eVW_Qop_T * Q[:] |> reshapeVW
 @time ψ1 = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_Q[:] ) ) |> reshapeVW
 # Output solution
-=#
 
 println("Outputting result...")
 Dataset("output.nc", "c") do ds
@@ -172,19 +171,30 @@ Dataset("output.nc", "c") do ds
     z_W    = defVar(ds, "z_W", Float64, ("Nzp1",))
     y_T    = defVar(ds, "y_T", Float64, ("Ny",))
     y_V    = defVar(ds, "y_V", Float64, ("Nyp1",))
+    p_T    = defVar(ds, "p_T", Float64, ("Nz",))
+    p_W    = defVar(ds, "p_W", Float64, ("Nzp1",))
 
+    p_T[:] = lev
+    p_W[:] = ilev
     z_T[:] = gd.z_T[:, 1, 1] 
     z_W[:] = gd.z_W[:, 1, 1]
-    y_T[:] = gd.ϕ_T[1, :, 1]
-    y_V[:] = gd.ϕ_V[1, :, 1]
+    y_T[:] = gd.ϕ_T[1, :, 1] .|> rad2deg
+    y_V[:] = gd.ϕ_V[1, :, 1] .|> rad2deg
 
     # simulation variables            
 
     defVar(ds, "psi",  ψ_VW,    ("Nzp1", "Nyp1", "Nx"))
     defVar(ds, "A_W",  A_W,     ("Nzp1", "Ny",   "Nx"))
     defVar(ds, "T_T",  T_T,     ("Nz",   "Ny",   "Nx"))
+    defVar(ds, "theta_T",  θ_T, ("Nz",   "Ny",   "Nx"))
     defVar(ds, "B_W",  B_W,     ("Nzp1", "Ny",   "Nx"))
     defVar(ds, "B_V",  B_V,     ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "C_V",  C_V,     ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "zeta_T",  ζ_T,  ("Nz",   "Ny", "Nx"))
+    defVar(ds, "f_T",  f_T,     ("Nz",   "Ny", "Nx"))
+    defVar(ds, "Delta_T",  Δ_T, ("Nz",   "Ny", "Nx"))
     
+    defVar(ds, "psi1",  ψ1,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "Q1",    Q,     ("Nz",   "Ny",   "Nx"))
 
 end

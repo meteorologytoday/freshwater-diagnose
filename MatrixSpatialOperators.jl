@@ -82,6 +82,7 @@ mutable struct MatrixSpatialOperators
  
     function MatrixSpatialOperators(
         gd :: Grid;
+        ocn_or_atm :: Symbol,
     )
 
 
@@ -91,7 +92,7 @@ mutable struct MatrixSpatialOperators
         
         cvtDiagOp = (a,) -> spdiagm(0 => view(a, :))
         
-        @time op = MatrixOperators(Ny=Ny, Nz=Nz, Nx=Nx)
+        @time op = MatrixOperators(Ny=Ny, Nz=Nz, Nx=Nx, ocn_or_atm=ocn_or_atm)
         
         
         mask_flat = view(gd.mask_T, :)
