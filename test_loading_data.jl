@@ -6,18 +6,18 @@ include("MatrixOperators.jl")
 include("MatrixSpatialOperators.jl")
 
 
-
-p0 = 1000.0 # hPa
-cp = 1004.0
-H  = 15e3
-θ0 = H / (cp / g)
-
+R  = 287.0
+cp = 5/2 * R
+p0 = 1e5 # Pa
 θ0 = 300.0
 H = cp * θ0 / g
+ρ0 = p0 / (R * θ0)
+κ = R / cp
 
 println("θ0 = ", θ0)
 
-calΠ = (p,) -> ( p / p0 ).^(2/5) 
+calσ = (z,) -> ρ0 * ( 1.0 - z / H)^(1/κ - 1)
+calΠ = (p,) -> ( p / p0 )^(2/5) 
 cvtDiagOp = (a,) -> spdiagm(0 => view(a, :))
 conform = (a,) -> transpose(a)[end:-1:1, :]
 
@@ -29,8 +29,9 @@ Dataset("avgzm.nc", "r") do ds
     global T_V    = ds["T"][:]     |> conform
     global U_V    = ds["U"][:]     |> conform
     global V_V    = ds["V"][:]     |> conform
-    global lev  = ds["lev"][:]  
-    global ilev = ds["ilev"][:]
+    global VU_V   = ds["VU"][:]     |> conform
+    global lev  = ds["lev"][:]  * 100.0
+    global ilev = ds["ilev"][:] * 100.0
     global lat  = ds["lat"][:]
     global slat = ds["slat"][:]
 
@@ -75,11 +76,19 @@ p0 = 1000.0 # hPa
 θ_T = T_T ./ Π_T
 θ_V = T_V ./ Π_V
 
-A_W = reshapeW( g/θ0 * sop.W_∂z_T * θ_T[:]) 
+σ_W = calσ.(gd.z_W)
+σ_V = calσ.(gd.z_V)
+σ_T = calσ.(gd.z_T)
+
+W_invσ_W = σ_W.^(-1) |> cvtDiagOp
+V_invσ_V = σ_V.^(-1) |> cvtDiagOp
+T_invσ_T = σ_T.^(-1) |> cvtDiagOp
+
+A_W = reshapeW( g/θ0 * W_invσ_W * sop.W_∂z_T * θ_T[:] ) 
 W_A_W = cvtDiagOp(A_W)
 
-B_V = reshapeV( - g/θ0 * sop.V_∂y_T * θ_T[:]) 
-B_W = reshapeW( - g/θ0 * sop.W_interp_T * sop.T_∂y_V * θ_V[:]) 
+B_V = reshapeV( - g/θ0 * V_invσ_V * sop.V_∂y_T * θ_T[:]) 
+B_W = reshapeW( - g/θ0 * W_invσ_W * sop.W_interp_T * sop.T_∂y_V * θ_V[:]) 
 
 V_B_V = cvtDiagOp(B_V)
 W_B_W = cvtDiagOp(B_W)
@@ -89,8 +98,8 @@ f_T = 2 * gd.Ω * sin.(gd.ϕ_T)
 ζ_T = - reshapeT(sop.T_DIVy_V * U_V[:])
 η_T = f_T + ζ_T
 
-C_T = η_T .* ( f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R )
-C_V = reshapeV( sop.V_interp_T * C_T[:])
+C_T = η_T .* ( f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R) ./ σ_T
+C_V = reshapeV( sop.V_interp_T * C_T[:] )
 V_C_V = cvtDiagOp(C_V)
 
 
@@ -148,14 +157,24 @@ VW_E_VW = (
 eVW_E_eVW = eVW_send_VW * VW_E_VW * VW_send_eVW
 eVW_Qop_T = eVW_send_VW * sop.VW_interp_V * sop.V_∂y_T
 
-eVW_VUop_V = eVW_VUop_VW * (
-    - sop.VW_interp_T * sop.T_DIVy_V
-    + sop.VW_interp_V * cvtDiagOp(tan.(gd.ϕ_V)) / gd.R
-)
+F_T = reshapeT( (
+    - sop.T_DIVy_V
+    + sop.T_interp_V * cvtDiagOp(tan.(gd.ϕ_V)) / gd.R
+) * VU_V[:] )
+
+eVW_Fop_T =  eVW_send_VW * sop.VW_interp_W * sop.W_∂z_T * cvtDiagOp(f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R)
+
 
 # Invert ψ
 RHS_Q = VW_send_eVW * eVW_Qop_T * Q[:] |> reshapeVW
 @time ψ1 = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_Q[:] ) ) |> reshapeVW
+
+RHS_F = VW_send_eVW * eVW_Fop_T * F_T[:] |> reshapeVW
+@time ψ2 = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_F[:] ) ) |> reshapeVW
+
+Ψ2 = ψ2 .* ( 2π * gd.R * cos.(gd.ϕ_VW))
+
+
 # Output solution
 
 println("Outputting result...")
@@ -200,5 +219,10 @@ Dataset("output.nc", "c") do ds
     
     defVar(ds, "psi1",  ψ1,    ("Nzp1", "Nyp1", "Nx"))
     defVar(ds, "Q1",    Q,     ("Nz",   "Ny",   "Nx"))
+    
+    defVar(ds, "psi2",  ψ2,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "PSI2",  Ψ2,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "F2",    VU_V,  ("Nz",   "Nyp1"))
+    defVar(ds, "RHS_F2",RHS_F, ("Nzp1", "Nyp1", "Nx"))
 
 end
