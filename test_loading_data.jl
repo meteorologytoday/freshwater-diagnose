@@ -148,6 +148,10 @@ VW_E_VW = (
 eVW_E_eVW = eVW_send_VW * VW_E_VW * VW_send_eVW
 eVW_Qop_T = eVW_send_VW * sop.VW_interp_V * sop.V_∂y_T
 
+eVW_VUop_V = eVW_VUop_VW * (
+    - sop.VW_interp_T * sop.T_DIVy_V
+    + sop.VW_interp_V * cvtDiagOp(tan.(gd.ϕ_V)) / gd.R
+)
 
 # Invert ψ
 RHS_Q = VW_send_eVW * eVW_Qop_T * Q[:] |> reshapeVW
