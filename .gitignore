@@ -1,5 +1,6 @@
 *.nc
 !avgzm.nc
+*.png
 
 *.swp
 *.tmp

@@ -30,6 +30,7 @@ Dataset("avgzm.nc", "r") do ds
     global U_V    = ds["U"][:]     |> conform
     global V_V    = ds["V"][:]     |> conform
     global VU_V   = ds["VU"][:]     |> conform
+    global VT_V   = ds["VT"][:]     |> conform
     global lev  = ds["lev"][:]  * 100.0
     global ilev = ds["ilev"][:] * 100.0
     global lat  = ds["lat"][:]
@@ -55,9 +56,9 @@ println("done.")
 mop = sop.op
 
 reshapeVW = (a,) -> reshape(a, mop.VW_dim) 
-reshapeW = (a,) -> reshape(a, mop.W_dim) 
-reshapeV = (a,) -> reshape(a, mop.V_dim) 
-reshapeT = (a,) -> reshape(a, mop.T_dim) 
+reshapeW  = (a,) -> reshape(a, mop.W_dim) 
+reshapeV  = (a,) -> reshape(a, mop.V_dim) 
+reshapeT  = (a,) -> reshape(a, mop.T_dim) 
 
 # Stream function
 ψ_VW = reshapeVW(calψ(ilev=ilev, lat=lat, v=convert(Array{Float64}, V_V)))
@@ -119,11 +120,13 @@ W_B_W = B * ones(Float64, mop.W_pts) |> cvtDiagOp
 =#
 
 ϕ = gd.ϕ_T
-Z = gd.z_T / gd.H
-ϕc = deg2rad(45)
-σϕ = deg2rad(2)
-Q0 = 0.1 # K / sec
-Q = Q0 * exp.( - ((ϕ .- ϕc) / σϕ ).^2 ) .* sin.(π*Z)
+z = gd.z_T
+ϕc = deg2rad(35)
+σϕ = deg2rad(10)
+zc = 5e3
+σz = 1e3
+Q0 = 10 / 86400.0 # K / sec
+Q = Q0 * exp.( - ((ϕ .- ϕc) / σϕ ).^2 ) .* exp.( - ((z .- zc) / σz ).^2 )
 
 
 #=
@@ -146,7 +149,9 @@ eVW_send_VW = sparse( mop.VW_I_VW[ mask_eVW , :] )
 VW_send_eVW = transpose(eVW_send_VW)
 println("eWV_send_WV constructed")
 
-# Making Operators
+### Making Operators ###
+
+# Elliptic operator
 VW_E_VW = (
     sop.VW_∂y_W * W_A_W * sop.W_DIVy_VW
     + sop.VW_∂z_V * V_C_V * sop.V_∂z_VW  
@@ -155,14 +160,29 @@ VW_E_VW = (
 ) 
 
 eVW_E_eVW = eVW_send_VW * VW_E_VW * VW_send_eVW
-eVW_Qop_T = eVW_send_VW * sop.VW_interp_V * sop.V_∂y_T
 
+# Q operator
+eVW_Qop_T = eVW_send_VW * sop.VW_interp_V * (g/θ0) * sop.V_∂y_T
+
+
+# F eddy momentum operator
+eVW_Fop_T =  eVW_send_VW * sop.VW_interp_W * sop.W_∂z_T * cvtDiagOp(f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R)
+
+# Q eddy heat operator
+eVW_QEop_T =  eVW_send_VW * sop.VW_interp_V * (g/θ0) * sop.V_∂y_T 
+
+### Compute forcing ###
+
+# Eddy mometum
 F_T = reshapeT( (
     - sop.T_DIVy_V
     + sop.T_interp_V * cvtDiagOp(tan.(gd.ϕ_V)) / gd.R
 ) * VU_V[:] )
 
-eVW_Fop_T =  eVW_send_VW * sop.VW_interp_W * sop.W_∂z_T * cvtDiagOp(f_T + 2 * U_T .* tan.(gd.ϕ_T) / gd.R)
+# Eddy heat
+
+Vθ_V = VT_V ./ Π_V
+QE_T = reshapeT( - sop.T_DIVy_V * Vθ_V[:] )
 
 
 # Invert ψ
@@ -170,9 +190,14 @@ RHS_Q = VW_send_eVW * eVW_Qop_T * Q[:] |> reshapeVW
 @time ψ1 = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_Q[:] ) ) |> reshapeVW
 
 RHS_F = VW_send_eVW * eVW_Fop_T * F_T[:] |> reshapeVW
-@time ψ2 = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_F[:] ) ) |> reshapeVW
+@time ψ2F = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_F[:] ) ) |> reshapeVW
 
-Ψ2 = ψ2 .* ( 2π * gd.R * cos.(gd.ϕ_VW))
+RHS_QE = VW_send_eVW * eVW_QEop_T * QE_T[:] |> reshapeVW
+@time ψ2QE = VW_send_eVW * ( eVW_E_eVW \ (eVW_send_VW * RHS_QE[:] ) ) |> reshapeVW
+
+Ψ1   = ψ1   .* ( 2π * gd.R * cos.(gd.ϕ_VW))
+Ψ2F  = ψ2F  .* ( 2π * gd.R * cos.(gd.ϕ_VW))
+Ψ2QE = ψ2QE .* ( 2π * gd.R * cos.(gd.ϕ_VW))
 
 
 # Output solution
@@ -206,23 +231,25 @@ Dataset("output.nc", "c") do ds
 
     # simulation variables            
 
-    defVar(ds, "psi",  ψ_VW,    ("Nzp1", "Nyp1", "Nx"))
-    defVar(ds, "A_W",  A_W,     ("Nzp1", "Ny",   "Nx"))
-    defVar(ds, "T_T",  T_T,     ("Nz",   "Ny",   "Nx"))
-    defVar(ds, "theta_T",  θ_T, ("Nz",   "Ny",   "Nx"))
-    defVar(ds, "B_W",  B_W,     ("Nzp1", "Ny",   "Nx"))
-    defVar(ds, "B_V",  B_V,     ("Nz",   "Nyp1", "Nx"))
-    defVar(ds, "C_V",  C_V,     ("Nz",   "Nyp1", "Nx"))
-    defVar(ds, "zeta_T",  ζ_T,  ("Nz",   "Ny", "Nx"))
-    defVar(ds, "f_T",  f_T,     ("Nz",   "Ny", "Nx"))
-    defVar(ds, "Delta_T",  Δ_T, ("Nz",   "Ny", "Nx"))
+    defVar(ds, "psi",      ψ_VW,  ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "A_W",      A_W,   ("Nzp1", "Ny",   "Nx"))
+    defVar(ds, "T_T",      T_T,   ("Nz",   "Ny",   "Nx"))
+    defVar(ds, "theta_T",  θ_T,   ("Nz",   "Ny",   "Nx"))
+    defVar(ds, "B_W",      B_W,   ("Nzp1", "Ny",   "Nx"))
+    defVar(ds, "B_V",      B_V,   ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "C_V",      C_V,   ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "zeta_T",   ζ_T,   ("Nz",   "Ny", "Nx"))
+    defVar(ds, "f_T",      f_T,   ("Nz",   "Ny", "Nx"))
+    defVar(ds, "Delta_T",  Δ_T,   ("Nz",   "Ny", "Nx"))
     
-    defVar(ds, "psi1",  ψ1,    ("Nzp1", "Nyp1", "Nx"))
-    defVar(ds, "Q1",    Q,     ("Nz",   "Ny",   "Nx"))
+    defVar(ds, "PSI1",     Ψ1,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "Q1",       Q,     ("Nz",   "Ny",   "Nx"))
     
-    defVar(ds, "psi2",  ψ2,    ("Nzp1", "Nyp1", "Nx"))
-    defVar(ds, "PSI2",  Ψ2,    ("Nzp1", "Nyp1", "Nx"))
-    defVar(ds, "F2",    VU_V,  ("Nz",   "Nyp1"))
-    defVar(ds, "RHS_F2",RHS_F, ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "PSI2F",     Ψ2F,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "PSI2QE",    Ψ2QE,    ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "F2",       reshapeV(VU_V),  ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "QE2",      reshapeV(Vθ_V),  ("Nz",   "Nyp1", "Nx"))
+    defVar(ds, "RHS_F2",   RHS_F,  ("Nzp1", "Nyp1", "Nx"))
+    defVar(ds, "RHS_QE2",  RHS_QE, ("Nzp1", "Nyp1", "Nx"))
 
 end
